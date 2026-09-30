@@ -1,0 +1,42 @@
+name: CD - Deploy to Kubernetes
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", "k8s/**", ".github/workflows/cd.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start Minikube
+        uses: medyagh/setup-minikube@latest
+        with:
+          driver: docker
+
+      - name: Build image inside Minikube
+        run: |
+          echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          minikube image build -t lab2-python-app:${GITHUB_SHA::7} ./app
+
+      - name: Point manifest at the new image
+        run: |
+          sed -i "s|\(image: .*:\).*|\1${TAG}|" k8s/deployment.yaml
+          grep image: k8s/deployment.yaml
+
+      - name: Apply manifests
+        run: kubectl apply -f k8s/
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/lab2-app --timeout=180s
+          kubectl get deployments,pods,svc
+
+      - name: Smoke test
+        run: |
+          URL=$(minikube service lab2-app-svc --url)
+          curl -sf $URL/health
